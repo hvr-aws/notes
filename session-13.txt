@@ -1,0 +1,253 @@
+variables
+conditions
+loops
+functions
+data types
+
+colors
+redirections
+exit status
+
+algorithm
+expense
+	mysql
+idempotency --> if you run the script infinite times, it should give smae result
+
+deployment or new version release
+--------------
+downtime announce --> We are under maintanance on 29-AUG 02:00AM-06:00AM
+stop the server
+back up the previous version
+remove the existing version
+download the new version
+start the server
+
+HTTP Methods and HTTP Status codes
+------------------------------------
+CRUD
+
+GET POST PUT DELETE OPTIONS
+
+GET --> read. read the data from database
+POST --> Create. You should send data. Usually it goes as json.
+PUT --> Update. update the existing information
+DELETE --> Delete. 
+
+2** --> 200, 201, 204 --> Success
+4** --> 400 client side error
+
+who is the client for backend --> frontend. 404--> Not found
+400 --> 
+401 --> 
+403 --> 
+400 - Bad Request
+401 - Unauthorized
+402 - Payment Required
+403 - Forbidden
+404 - File Not Found
+405 - Method Not Allowed
+
+5** --> Server side error. they have to fix
+500 - Internal Server Error
+502 - Bad Gateway
+503 - Service Unavailable
+504 - Gateway Timeout
+
+3** --> redirecting
+
+Frontend --> Backend --> Database
+/var/log/nginx
+
+/var/log/messages
+
+trap function
+
+ERR
+
+
+Deleting old logs using shell script
+-------------------------------------
+write a script that should delete .log files which are older than 14 days
+
+*.log --> more than 14 days old
+
+1. which directory
+2. is that directory exists?
+3. find the files
+4. delete them
+
+while loop --> read the output or reading the files
+
+Backend.shell
+---------------
+#!/bin/bash
+
+LOGS_FOLDER="/var/log/expense"
+SCRIPT_NAME=$(echo $0 | cut -d "." -f1)
+TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
+LOG_FILE="$LOGS_FOLDER/$SCRIPT_NAME-$TIMESTAMP.log"
+mkdir -p $LOGS_FOLDER
+
+USERID=$(id -u)
+R="\e[31m"
+G="\e[32m"
+N="\e[0m"
+Y="\e[33m"
+
+CHECK_ROOT(){
+    if [ $USERID -ne 0 ]
+    then
+        echo -e "$R Please run this script with root priveleges $N" | tee -a $LOG_FILE
+        exit 1
+    fi
+}
+
+VALIDATE(){
+    if [ $1 -ne 0 ]
+    then
+        echo -e "$2 is...$R FAILED $N"  | tee -a $LOG_FILE
+        exit 1
+    else
+        echo -e "$2 is... $G SUCCESS $N" | tee -a $LOG_FILE
+    fi
+}
+
+echo "Script started executing at: $(date)" | tee -a $LOG_FILE
+
+CHECK_ROOT
+
+dnf module disable nodejs -y &>>$LOG_FILE
+VALIDATE $? "Disable default nodejs"
+
+dnf module enable nodejs:20 -y &>>$LOG_FILE
+VALIDATE $? "Enable nodejs:20"
+
+dnf install nodejs -y &>>$LOG_FILE
+VALIDATE $? "Install nodejs"
+
+id expense &>>$LOG_FILE
+if [ $? -ne 0 ]
+then
+    echo -e "expense user not exists... $G Creating $N"
+    useradd expense &>>$LOG_FILE
+    VALIDATE $? "Creating expense user"
+else
+    echo -e "expense user already exists...$Y SKIPPING $N"
+fi
+
+mkdir -p /app
+VALIDATE $? "Creating /app folder"
+
+curl -o /tmp/backend.zip https://expense-builds.s3.us-east-1.amazonaws.com/expense-backend-v2.zip &>>$LOG_FILE
+VALIDATE $? "Downloading backend application code"
+
+cd /app
+rm -rf /app/* # remove the existing code
+unzip /tmp/backend.zip &>>$LOG_FILE
+VALIDATE $? "Extracting backend application code"
+
+npm install &>>$LOG_FILE
+cp /home/ec2-user/expense-shell/backend.service /etc/systemd/system/backend.service
+
+# load the data before running backend
+
+dnf install mysql -y &>>$LOG_FILE
+VALIDATE $? "Installing MySQL Client"
+
+mysql -h mysql.daws81s.online -uroot -pExpenseApp@1 < /app/schema/backend.sql &>>$LOG_FILE
+VALIDATE $? "Schema loading"
+
+systemctl daemon-reload &>>$LOG_FILE
+VALIDATE $? "Daemon reload"
+
+systemctl enable backend &>>$LOG_FILE
+VALIDATE $? "Enabled backend"
+
+systemctl restart backend &>>$LOG_FILE
+VALIDATE $? "Restarted Backend"
+
+Frontend.shell
+---------------
+#!/bin/bash
+
+LOGS_FOLDER="/var/log/expense"
+SCRIPT_NAME=$(echo $0 | cut -d "." -f1)
+TIMESTAMP=$(date +%Y-%m-%d-%H-%M-%S)
+LOG_FILE="$LOGS_FOLDER/$SCRIPT_NAME-$TIMESTAMP.log"
+mkdir -p $LOGS_FOLDER
+
+USERID=$(id -u)
+R="\e[31m"
+G="\e[32m"
+N="\e[0m"
+Y="\e[33m"
+
+CHECK_ROOT(){
+    if [ $USERID -ne 0 ]
+    then
+        echo -e "$R Please run this script with root priveleges $N" | tee -a $LOG_FILE
+        exit 1
+    fi
+}
+
+VALIDATE(){
+    if [ $1 -ne 0 ]
+    then
+        echo -e "$2 is...$R FAILED $N"  | tee -a $LOG_FILE
+        exit 1
+    else
+        echo -e "$2 is... $G SUCCESS $N" | tee -a $LOG_FILE
+    fi
+}
+
+echo "Script started executing at: $(date)" | tee -a $LOG_FILE
+
+CHECK_ROOT
+
+dnf install nginx -y &>>$LOG_FILE
+VALIDATE $? "Installing Nginx"
+
+systemctl enable nginx &>>$LOG_FILE
+VALIDATE $? "Enable Nginx"
+
+systemctl start nginx &>>$LOG_FILE
+VALIDATE $? "Start Nginx"
+
+rm -rf /usr/share/nginx/html/* &>>$LOG_FILE
+VALIDATE $? "Removing default website"
+
+curl -o /tmp/frontend.zip https://expense-builds.s3.us-east-1.amazonaws.com/expense-frontend-v2.zip &>>$LOG_FILE
+VALIDATE $? "Downloding frontend code"
+
+cd /usr/share/nginx/html
+unzip /tmp/frontend.zip &>>$LOG_FILE
+VALIDATE $? "Extract frontend code"
+
+cp /home/ec2-user/expense-shell/expense.conf /etc/nginx/default.d/expense.conf
+VALIDATE $? "Copied expense conf"
+
+systemctl restart nginx &>>$LOG_FILE
+VALIDATE $? "Restarted Nginx"
+
+expense.conf
+---------------
+proxy_http_version 1.1;
+
+location /api/ { proxy_pass http://backend.daws81s.online:8080/; }
+
+location /health {
+  stub_status on;
+  access_log off;
+}
+
+backend.service
+---------------
+proxy_http_version 1.1;
+
+location /api/ { proxy_pass http://backend.daws81s.online:8080/; }
+
+location /health {
+  stub_status on;
+  access_log off;
+}
+
